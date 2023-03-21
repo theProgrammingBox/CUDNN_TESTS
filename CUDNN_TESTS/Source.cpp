@@ -1,4 +1,5 @@
 #include <cudnn.h>
+#include <cuda_fp16.h>
 #include <iostream>
 
 int main() {
@@ -32,10 +33,10 @@ int main() {
 	cudnnCreateFilterDescriptor(&kernel_descriptor);
 	cudnnCreateConvolutionDescriptor(&convolution_descriptor);
 	
-	cudnnSetTensor4dDescriptor(input_descriptor, CUDNN_TENSOR_NHWC, CUDNN_DATA_FLOAT, BATCH_SIZE, INPUT_CHANNELS, INPUT_ROWS, INPUT_COLS);
-	cudnnSetTensor4dDescriptor(output_descriptor, CUDNN_TENSOR_NHWC, CUDNN_DATA_FLOAT, BATCH_SIZE, OUTPUT_CHANNELS, OUTPUT_ROWS, OUTPUT_COLS);
-	cudnnSetFilter4dDescriptor(kernel_descriptor, CUDNN_DATA_FLOAT, CUDNN_TENSOR_NHWC, OUTPUT_CHANNELS, INPUT_CHANNELS, FILTER_ROWS, FILTER_COLS);
-	cudnnSetConvolution2dDescriptor(convolution_descriptor, PADDING, PADDING, STRIDE, STRIDE, DILATION, DILATION, CUDNN_CROSS_CORRELATION, CUDNN_DATA_FLOAT);
+	cudnnSetTensor4dDescriptor(input_descriptor, CUDNN_TENSOR_NHWC, CUDNN_DATA_HALF, BATCH_SIZE, INPUT_CHANNELS, INPUT_ROWS, INPUT_COLS);
+	cudnnSetTensor4dDescriptor(output_descriptor, CUDNN_TENSOR_NHWC, CUDNN_DATA_HALF, BATCH_SIZE, OUTPUT_CHANNELS, OUTPUT_ROWS, OUTPUT_COLS);
+	cudnnSetFilter4dDescriptor(kernel_descriptor, CUDNN_DATA_HALF, CUDNN_TENSOR_NHWC, OUTPUT_CHANNELS, INPUT_CHANNELS, FILTER_ROWS, FILTER_COLS);
+	cudnnSetConvolution2dDescriptor(convolution_descriptor, PADDING, PADDING, STRIDE, STRIDE, DILATION, DILATION, CUDNN_CROSS_CORRELATION, CUDNN_DATA_HALF);
 	
 	cudnnConvolutionFwdAlgo_t forwardPropagationAlgorithm;
 	int maxPropagationAlgorithms;
@@ -51,33 +52,32 @@ int main() {
 	void* workspace;
 	cudaMalloc(&workspace, workspaceBytes);
 	
-	float* gpuInput;
-	float* gpuOutput;
-	float* gpuFilter;
+	__half* gpuInput;
+	__half* gpuOutput;
+	__half* gpuFilter;
 	
-	cudaMalloc(&gpuInput, BATCH_SIZE * INPUT_CHANNELS * INPUT_ROWS * INPUT_COLS * sizeof(float));
-	cudaMalloc(&gpuOutput, BATCH_SIZE * OUTPUT_CHANNELS * OUTPUT_ROWS * OUTPUT_COLS * sizeof(float));
-	cudaMalloc(&gpuFilter, OUTPUT_CHANNELS * INPUT_CHANNELS * FILTER_ROWS * FILTER_COLS * sizeof(float));
+	cudaMalloc(&gpuInput, BATCH_SIZE * INPUT_CHANNELS * INPUT_ROWS * INPUT_COLS * sizeof(__half));
+	cudaMalloc(&gpuOutput, BATCH_SIZE * OUTPUT_CHANNELS * OUTPUT_ROWS * OUTPUT_COLS * sizeof(__half));
+	cudaMalloc(&gpuFilter, OUTPUT_CHANNELS * INPUT_CHANNELS * FILTER_ROWS * FILTER_COLS * sizeof(__half));
 	
-	float* input = new float[BATCH_SIZE * INPUT_CHANNELS * INPUT_ROWS * INPUT_COLS];
-	float* output = new float[BATCH_SIZE * OUTPUT_CHANNELS * OUTPUT_ROWS * OUTPUT_COLS];
-	float* filter = new float[OUTPUT_CHANNELS * INPUT_CHANNELS * FILTER_ROWS * FILTER_COLS];
+	__half* input = new __half[BATCH_SIZE * INPUT_CHANNELS * INPUT_ROWS * INPUT_COLS];
+	__half* output = new __half[BATCH_SIZE * OUTPUT_CHANNELS * OUTPUT_ROWS * OUTPUT_COLS];
+	__half* filter = new __half[OUTPUT_CHANNELS * INPUT_CHANNELS * FILTER_ROWS * FILTER_COLS];
 
 	for (int i = 0; i < BATCH_SIZE * INPUT_CHANNELS * INPUT_ROWS * INPUT_COLS; i++)
-		input[i] = (float)rand() / (float)RAND_MAX;
+		input[i] = __float2half((float)rand() / (float)RAND_MAX);
 	for (int i = 0; i < OUTPUT_CHANNELS * INPUT_CHANNELS * FILTER_ROWS * FILTER_COLS; i++)
-		filter[i] = (float)rand() / (float)RAND_MAX;
+		filter[i] = __float2half((float)rand() / (float)RAND_MAX);
 	
-	cudaMemcpy(gpuInput, input, BATCH_SIZE * INPUT_CHANNELS * INPUT_ROWS * INPUT_COLS * sizeof(float), cudaMemcpyHostToDevice);
-	cudaMemcpy(gpuFilter, filter, OUTPUT_CHANNELS * INPUT_CHANNELS * FILTER_ROWS * FILTER_COLS * sizeof(float), cudaMemcpyHostToDevice);
+	cudaMemcpy(gpuInput, input, BATCH_SIZE * INPUT_CHANNELS * INPUT_ROWS * INPUT_COLS * sizeof(__half), cudaMemcpyHostToDevice);
+	cudaMemcpy(gpuFilter, filter, OUTPUT_CHANNELS * INPUT_CHANNELS * FILTER_ROWS * FILTER_COLS * sizeof(__half), cudaMemcpyHostToDevice);
 	
 	const float alpha = 1.0f;
 	const float beta = 0.0f;
 	cudnnConvolutionForward(cudnnHandle, &alpha, input_descriptor, gpuInput, kernel_descriptor, gpuFilter, convolution_descriptor, forwardPropagationAlgorithm, workspace, workspaceBytes, &beta, output_descriptor, gpuOutput);
 	
-	cudaMemcpy(output, gpuOutput, BATCH_SIZE * OUTPUT_CHANNELS * OUTPUT_ROWS * OUTPUT_COLS * sizeof(float), cudaMemcpyDeviceToHost);
-
-	// print the input and filter
+	cudaMemcpy(output, gpuOutput, BATCH_SIZE * OUTPUT_CHANNELS * OUTPUT_ROWS * OUTPUT_COLS * sizeof(__half), cudaMemcpyDeviceToHost);
+	
 	for (uint32_t i = 0; i < BATCH_SIZE; i++)
 	{
 		for (uint32_t j = 0; j < INPUT_CHANNELS; j++)
@@ -86,7 +86,8 @@ int main() {
 			{
 				for (uint32_t l = 0; l < INPUT_COLS; l++)
 				{
-					printf("%f ", input[i * INPUT_CHANNELS * INPUT_ROWS * INPUT_COLS + j * INPUT_ROWS * INPUT_COLS + k * INPUT_COLS + l]);
+					//printf("%f ", input[i * INPUT_CHANNELS * INPUT_ROWS * INPUT_COLS + j * INPUT_ROWS * INPUT_COLS + k * INPUT_COLS + l]);
+					printf("%f ", __half2float(input[i * INPUT_CHANNELS * INPUT_ROWS * INPUT_COLS + j * INPUT_ROWS * INPUT_COLS + k * INPUT_COLS + l]));
 				}
 				printf("\n");
 			}
@@ -103,7 +104,8 @@ int main() {
 			{
 				for (uint32_t l = 0; l < FILTER_COLS; l++)
 				{
-					printf("%f ", filter[i * INPUT_CHANNELS * FILTER_ROWS * FILTER_COLS + j * FILTER_ROWS * FILTER_COLS + k * FILTER_COLS + l]);
+					//printf("%f ", filter[i * INPUT_CHANNELS * FILTER_ROWS * FILTER_COLS + j * FILTER_ROWS * FILTER_COLS + k * FILTER_COLS + l]);
+					printf("%f ", __half2float(filter[i * INPUT_CHANNELS * FILTER_ROWS * FILTER_COLS + j * FILTER_ROWS * FILTER_COLS + k * FILTER_COLS + l]));
 				}
 				printf("\n");
 			}
@@ -112,8 +114,7 @@ int main() {
 		printf("\n");
 	}
 	printf("\n");
-
-	// printing the output
+	
 	for (uint32_t i = 0; i < BATCH_SIZE; i++)
 	{
 		for (uint32_t j = 0; j < OUTPUT_CHANNELS; j++)
@@ -122,7 +123,8 @@ int main() {
 			{
 				for (uint32_t l = 0; l < OUTPUT_COLS; l++)
 				{
-					printf("%f ", output[i * OUTPUT_CHANNELS * OUTPUT_ROWS * OUTPUT_COLS + j * OUTPUT_ROWS * OUTPUT_COLS + k * OUTPUT_COLS + l]);
+					//printf("%f ", output[i * OUTPUT_CHANNELS * OUTPUT_ROWS * OUTPUT_COLS + j * OUTPUT_ROWS * OUTPUT_COLS + k * OUTPUT_COLS + l]);
+					printf("%f ", __half2float(output[i * OUTPUT_CHANNELS * OUTPUT_ROWS * OUTPUT_COLS + j * OUTPUT_ROWS * OUTPUT_COLS + k * OUTPUT_COLS + l]));
 				}
 				printf("\n");
 			}
@@ -130,8 +132,7 @@ int main() {
 		}
 		printf("\n");
 	}
-
-	// cpu implementation
+	
 	for (uint32_t i = 0; i < BATCH_SIZE; i++)
 	{
 		for (uint32_t j = 0; j < OUTPUT_CHANNELS; j++)
@@ -147,7 +148,8 @@ int main() {
 						{
 							for (uint32_t o = 0; o < FILTER_COLS; o++)
 							{
-								sum += input[i * INPUT_CHANNELS * INPUT_ROWS * INPUT_COLS + m * INPUT_ROWS * INPUT_COLS + (k + n) * INPUT_COLS + (l + o)] * filter[j * INPUT_CHANNELS * FILTER_ROWS * FILTER_COLS + m * FILTER_ROWS * FILTER_COLS + n * FILTER_COLS + o];
+								//sum += input[i * INPUT_CHANNELS * INPUT_ROWS * INPUT_COLS + m * INPUT_ROWS * INPUT_COLS + (k + n) * INPUT_COLS + (l + o)] * filter[j * INPUT_CHANNELS * FILTER_ROWS * FILTER_COLS + m * FILTER_ROWS * FILTER_COLS + n * FILTER_COLS + o];
+								sum += __half2float(input[i * INPUT_CHANNELS * INPUT_ROWS * INPUT_COLS + m * INPUT_ROWS * INPUT_COLS + (k + n) * INPUT_COLS + (l + o)]) * __half2float(filter[j * INPUT_CHANNELS * FILTER_ROWS * FILTER_COLS + m * FILTER_ROWS * FILTER_COLS + n * FILTER_COLS + o]);
 							}
 						}
 					}
