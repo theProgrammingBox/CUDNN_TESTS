@@ -30,59 +30,59 @@ int main() {
 	cudnnTensorDescriptor_t input_descriptor;
 	cudnnCreateTensorDescriptor(&input_descriptor);
 	cudnnSetTensor4dDescriptor(input_descriptor,
-		/*format=*/CUDNN_TENSOR_NCHW,
-		/*dataType=*/CUDNN_DATA_FLOAT,
-		/*batch_size=*/batchSize,
-		/*channels=*/inputChannels,
-		/*image_height=*/inputImageRows,
-		/*image_width=*/inputImageCols);
+		CUDNN_TENSOR_NHWC,
+		CUDNN_DATA_FLOAT,
+		batchSize,
+		inputChannels,
+		inputImageRows,
+		inputImageCols);
 
 	cudnnTensorDescriptor_t output_descriptor;
 	cudnnCreateTensorDescriptor(&output_descriptor);
 	cudnnSetTensor4dDescriptor(output_descriptor,
-		/*format=*/CUDNN_TENSOR_NCHW,
-		/*dataType=*/CUDNN_DATA_FLOAT,
-		/*batch_size=*/batchSize,
-		/*channels=*/outputChannels,
-		/*image_height=*/outputImageRows,
-		/*image_width=*/outputImageCols);
+		CUDNN_TENSOR_NHWC,
+		CUDNN_DATA_FLOAT,
+		batchSize,
+		outputChannels,
+		outputImageRows,
+		outputImageCols);
 
 	cudnnFilterDescriptor_t kernel_descriptor;
 	cudnnCreateFilterDescriptor(&kernel_descriptor);
 	cudnnSetFilter4dDescriptor(kernel_descriptor,
-		/*dataType=*/CUDNN_DATA_FLOAT,
-		/*format=*/CUDNN_TENSOR_NCHW,
-		/*out_channels=*/outputChannels,
-		/*in_channels=*/inputChannels,
-		/*kernel_height=*/filterRows,
-		/*kernel_width=*/filterCols);
+		CUDNN_DATA_FLOAT,
+		CUDNN_TENSOR_NHWC,
+		outputChannels,
+		inputChannels,
+		filterRows,
+		filterCols);
 
 	cudnnConvolutionDescriptor_t convolution_descriptor;
 	cudnnCreateConvolutionDescriptor(&convolution_descriptor);
 	cudnnSetConvolution2dDescriptor(convolution_descriptor,
-		/*pad_height=*/verticalPadding,
-		/*pad_width=*/horizontalPadding,
-		/*vertical_stride=*/verticalStride,
-		/*horizontal_stride=*/horizontalStride,
-		/*dilation_height=*/verticalDilation,
-		/*dilation_width=*/horizontalDilation,
-		/*mode=*/CUDNN_CROSS_CORRELATION,
-		/*computeType=*/CUDNN_DATA_FLOAT);
-
-	int maxPropagationAlgorithms;
-	cudnnGetConvolutionForwardAlgorithmMaxCount(cudnnHandle, &maxPropagationAlgorithms);
+		verticalPadding,
+		horizontalPadding,
+		verticalStride,
+		horizontalStride,
+		verticalDilation,
+		horizontalDilation,
+		CUDNN_CROSS_CORRELATION,
+		CUDNN_DATA_FLOAT);
+	
+	int count = 1;
 	cudnnConvolutionFwdAlgo_t forwardPropagationAlgorithm;
-	cudnnConvolutionFwdAlgoPerf_t* forwardPropagationAlgorithms = new cudnnConvolutionFwdAlgoPerf_t[maxPropagationAlgorithms];
+	cudnnConvolutionFwdAlgoPerf_t* forwardPropagationAlgorithms = new cudnnConvolutionFwdAlgoPerf_t[1];
 	cudnnFindConvolutionForwardAlgorithm(cudnnHandle,
 		input_descriptor,
 		kernel_descriptor,
 		convolution_descriptor,
 		output_descriptor,
-		maxPropagationAlgorithms,
-		&maxPropagationAlgorithms,
+		count,
+		&count,
 		forwardPropagationAlgorithms);
 	forwardPropagationAlgorithm = forwardPropagationAlgorithms[0].algo;
 	delete[] forwardPropagationAlgorithms;
+	printf("Forward propagation algorithm: %d\n\n", forwardPropagationAlgorithm);
 	
 	size_t workspaceBytes = 0;
 	void* workspace = nullptr;
