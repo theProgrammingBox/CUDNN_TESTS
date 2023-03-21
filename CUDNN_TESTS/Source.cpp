@@ -4,158 +4,125 @@
 int main() {
 	cudnnHandle_t cudnnHandle;
 	cudnnCreate(&cudnnHandle);
+	
+	const uint32_t BATCH_SIZE = 1;
+	
+	const uint32_t INPUT_CHANNELS = 1;
+	const uint32_t INPUT_ROWS = 16;
+	const uint32_t INPUT_COLS = 16;
 
-	const uint32_t batchSize = 1;
-	
-	const uint32_t inputChannels = 1;		// number of images stacked
-	const uint32_t inputImageRows = 16;		// height of the input image
-	const uint32_t inputImageCols = 16;		// width of the input image
-	
-	const uint32_t outputChannels = 1;
-	const uint32_t outputImageRows = 4;
-	const uint32_t outputImageCols = 4;
-	
-	const uint32_t filterRows = 4;			// weight
-	const uint32_t filterCols = 4;
-	
-	const uint32_t verticalStride = 4;		// how many pixels to move the filter down
-	const uint32_t horizontalStride = 4;	// how many pixels to move the filter right
-	
-	const uint32_t verticalPadding = 0;
-	const uint32_t horizontalPadding = 0;
-	
-	const uint32_t verticalDilation = 1;	// how many pixels to skip when convolving
-	const uint32_t horizontalDilation = 1;	// how many pixels to skip when convolving
+	const uint32_t OUTPUT_CHANNELS = 1;
+	const uint32_t OUTPUT_ROWS = 4;
+	const uint32_t OUTPUT_COLS = 4;
+
+	const uint32_t FILTER_ROWS = 4;
+	const uint32_t FILTER_COLS = 4;
+
+	const uint32_t PADDING = 0;
+	const uint32_t STRIDE = 4;
+	const uint32_t DILATION = 1;
 	
 	cudnnTensorDescriptor_t input_descriptor;
-	cudnnCreateTensorDescriptor(&input_descriptor);
-	cudnnSetTensor4dDescriptor(input_descriptor,
-		CUDNN_TENSOR_NHWC,
-		CUDNN_DATA_FLOAT,
-		batchSize,
-		inputChannels,
-		inputImageRows,
-		inputImageCols);
-
 	cudnnTensorDescriptor_t output_descriptor;
-	cudnnCreateTensorDescriptor(&output_descriptor);
-	cudnnSetTensor4dDescriptor(output_descriptor,
-		CUDNN_TENSOR_NHWC,
-		CUDNN_DATA_FLOAT,
-		batchSize,
-		outputChannels,
-		outputImageRows,
-		outputImageCols);
-
 	cudnnFilterDescriptor_t kernel_descriptor;
-	cudnnCreateFilterDescriptor(&kernel_descriptor);
-	cudnnSetFilter4dDescriptor(kernel_descriptor,
-		CUDNN_DATA_FLOAT,
-		CUDNN_TENSOR_NHWC,
-		outputChannels,
-		inputChannels,
-		filterRows,
-		filterCols);
-
 	cudnnConvolutionDescriptor_t convolution_descriptor;
-	cudnnCreateConvolutionDescriptor(&convolution_descriptor);
-	cudnnSetConvolution2dDescriptor(convolution_descriptor,
-		verticalPadding,
-		horizontalPadding,
-		verticalStride,
-		horizontalStride,
-		verticalDilation,
-		horizontalDilation,
-		CUDNN_CROSS_CORRELATION,
-		CUDNN_DATA_FLOAT);
 	
-	int count = 1;
+	cudnnCreateTensorDescriptor(&input_descriptor);
+	cudnnCreateTensorDescriptor(&output_descriptor);
+	cudnnCreateFilterDescriptor(&kernel_descriptor);
+	cudnnCreateConvolutionDescriptor(&convolution_descriptor);
+	
+	cudnnSetTensor4dDescriptor(input_descriptor, CUDNN_TENSOR_NHWC, CUDNN_DATA_FLOAT, BATCH_SIZE, INPUT_CHANNELS, INPUT_ROWS, INPUT_COLS);
+	cudnnSetTensor4dDescriptor(output_descriptor, CUDNN_TENSOR_NHWC, CUDNN_DATA_FLOAT, BATCH_SIZE, OUTPUT_CHANNELS, OUTPUT_ROWS, OUTPUT_COLS);
+	cudnnSetFilter4dDescriptor(kernel_descriptor, CUDNN_DATA_FLOAT, CUDNN_TENSOR_NHWC, OUTPUT_CHANNELS, INPUT_CHANNELS, FILTER_ROWS, FILTER_COLS);
+	cudnnSetConvolution2dDescriptor(convolution_descriptor, PADDING, PADDING, STRIDE, STRIDE, DILATION, DILATION, CUDNN_CROSS_CORRELATION, CUDNN_DATA_FLOAT);
+	
 	cudnnConvolutionFwdAlgo_t forwardPropagationAlgorithm;
-	cudnnConvolutionFwdAlgoPerf_t* forwardPropagationAlgorithms = new cudnnConvolutionFwdAlgoPerf_t[1];
-	cudnnFindConvolutionForwardAlgorithm(cudnnHandle,
-		input_descriptor,
-		kernel_descriptor,
-		convolution_descriptor,
-		output_descriptor,
-		count,
-		&count,
-		forwardPropagationAlgorithms);
+	int maxPropagationAlgorithms;
+	cudnnGetConvolutionForwardAlgorithmMaxCount(cudnnHandle, &maxPropagationAlgorithms);
+	cudnnConvolutionFwdAlgoPerf_t* forwardPropagationAlgorithms = new cudnnConvolutionFwdAlgoPerf_t[maxPropagationAlgorithms];
+	cudnnFindConvolutionForwardAlgorithm(cudnnHandle, input_descriptor, kernel_descriptor, convolution_descriptor, output_descriptor, maxPropagationAlgorithms, &maxPropagationAlgorithms, forwardPropagationAlgorithms);
 	forwardPropagationAlgorithm = forwardPropagationAlgorithms[0].algo;
 	delete[] forwardPropagationAlgorithms;
 	printf("Forward propagation algorithm: %d\n\n", forwardPropagationAlgorithm);
 	
 	size_t workspaceBytes = 0;
-	void* workspace = nullptr;
-	cudnnGetConvolutionForwardWorkspaceSize(cudnnHandle,
-		input_descriptor,
-		kernel_descriptor,
-		convolution_descriptor,
-		output_descriptor,
-		forwardPropagationAlgorithm,
-		&workspaceBytes);
+	cudnnGetConvolutionForwardWorkspaceSize(cudnnHandle, input_descriptor, kernel_descriptor, convolution_descriptor, output_descriptor, forwardPropagationAlgorithm, &workspaceBytes);
+	void* workspace;
 	cudaMalloc(&workspace, workspaceBytes);
-
-	// now we can run the convolution
-	const float alpha = 1.0f;
-	const float beta = 0.0f;
-
-	// creating the random input, output, and filter data
-	float* input = new float[batchSize * inputChannels * inputImageRows * inputImageCols];
-	float* output = new float[batchSize * outputChannels * outputImageRows * outputImageCols];
-	float* filter = new float[outputChannels * inputChannels * filterRows * filterCols];
-
-	for (int i = 0; i < batchSize * inputChannels * inputImageRows * inputImageCols; i++)
-	{
-		input[i] = (float)rand() / (float)RAND_MAX;
-	}
-	for (int i = 0; i < outputChannels * inputChannels * filterRows * filterCols; i++)
-	{
-		filter[i] = (float)rand() / (float)RAND_MAX;
-	}
-
-	// allocating memory on the gpu
+	
 	float* gpuInput;
 	float* gpuOutput;
 	float* gpuFilter;
-	cudaMalloc(&gpuInput, batchSize * inputChannels * inputImageRows * inputImageCols * sizeof(float));
-	cudaMalloc(&gpuOutput, batchSize * outputChannels * outputImageRows * outputImageCols * sizeof(float));
-	cudaMalloc(&gpuFilter, outputChannels * inputChannels * filterRows * filterCols * sizeof(float));
-	cudaMemcpy(gpuInput, input, batchSize * inputChannels * inputImageRows * inputImageCols * sizeof(float), cudaMemcpyHostToDevice);
-	cudaMemcpy(gpuFilter, filter, outputChannels * inputChannels * filterRows * filterCols * sizeof(float), cudaMemcpyHostToDevice);
+	
+	cudaMalloc(&gpuInput, BATCH_SIZE * INPUT_CHANNELS * INPUT_ROWS * INPUT_COLS * sizeof(float));
+	cudaMalloc(&gpuOutput, BATCH_SIZE * OUTPUT_CHANNELS * OUTPUT_ROWS * OUTPUT_COLS * sizeof(float));
+	cudaMalloc(&gpuFilter, OUTPUT_CHANNELS * INPUT_CHANNELS * FILTER_ROWS * FILTER_COLS * sizeof(float));
+	
+	float* input = new float[BATCH_SIZE * INPUT_CHANNELS * INPUT_ROWS * INPUT_COLS];
+	float* output = new float[BATCH_SIZE * OUTPUT_CHANNELS * OUTPUT_ROWS * OUTPUT_COLS];
+	float* filter = new float[OUTPUT_CHANNELS * INPUT_CHANNELS * FILTER_ROWS * FILTER_COLS];
 
-	// running the convolution
-	cudnnConvolutionForward(cudnnHandle,
-		&alpha,
-		input_descriptor,
-		gpuInput,
-		kernel_descriptor,
-		gpuFilter,
-		convolution_descriptor,
-		forwardPropagationAlgorithm,
-		workspace,
-		workspaceBytes,
-		&beta,
-		output_descriptor,
-		gpuOutput);
+	for (int i = 0; i < BATCH_SIZE * INPUT_CHANNELS * INPUT_ROWS * INPUT_COLS; i++)
+		input[i] = (float)rand() / (float)RAND_MAX;
+	for (int i = 0; i < OUTPUT_CHANNELS * INPUT_CHANNELS * FILTER_ROWS * FILTER_COLS; i++)
+		filter[i] = (float)rand() / (float)RAND_MAX;
+	
+	cudaMemcpy(gpuInput, input, BATCH_SIZE * INPUT_CHANNELS * INPUT_ROWS * INPUT_COLS * sizeof(float), cudaMemcpyHostToDevice);
+	cudaMemcpy(gpuFilter, filter, OUTPUT_CHANNELS * INPUT_CHANNELS * FILTER_ROWS * FILTER_COLS * sizeof(float), cudaMemcpyHostToDevice);
+	
+	const float alpha = 1.0f;
+	const float beta = 0.0f;
+	cudnnConvolutionForward(cudnnHandle, &alpha, input_descriptor, gpuInput, kernel_descriptor, gpuFilter, convolution_descriptor, forwardPropagationAlgorithm, workspace, workspaceBytes, &beta, output_descriptor, gpuOutput);
+	
+	cudaMemcpy(output, gpuOutput, BATCH_SIZE * OUTPUT_CHANNELS * OUTPUT_ROWS * OUTPUT_COLS * sizeof(float), cudaMemcpyDeviceToHost);
 
-	// copying the output back to the cpu
-	cudaMemcpy(output, gpuOutput, batchSize * outputChannels * outputImageRows * outputImageCols * sizeof(float), cudaMemcpyDeviceToHost);
+	// print the input and filter
+	for (uint32_t i = 0; i < BATCH_SIZE; i++)
+	{
+		for (uint32_t j = 0; j < INPUT_CHANNELS; j++)
+		{
+			for (uint32_t k = 0; k < INPUT_ROWS; k++)
+			{
+				for (uint32_t l = 0; l < INPUT_COLS; l++)
+				{
+					printf("%f ", input[i * INPUT_CHANNELS * INPUT_ROWS * INPUT_COLS + j * INPUT_ROWS * INPUT_COLS + k * INPUT_COLS + l]);
+				}
+				printf("\n");
+			}
+			printf("\n");
+		}
+		printf("\n");
+	}
 
-	printf("verticalPadding: %d\n", verticalPadding);
-	printf("horizontalPadding: %d\n", horizontalPadding);
-	printf("verticalStride: %d\n", verticalStride);
-	printf("horizontalStride: %d\n", horizontalStride);
+	for (uint32_t i = 0; i < OUTPUT_CHANNELS; i++)
+	{
+		for (uint32_t j = 0; j < INPUT_CHANNELS; j++)
+		{
+			for (uint32_t k = 0; k < FILTER_ROWS; k++)
+			{
+				for (uint32_t l = 0; l < FILTER_COLS; l++)
+				{
+					printf("%f ", filter[i * INPUT_CHANNELS * FILTER_ROWS * FILTER_COLS + j * FILTER_ROWS * FILTER_COLS + k * FILTER_COLS + l]);
+				}
+				printf("\n");
+			}
+			printf("\n");
+		}
+		printf("\n");
+	}
+	printf("\n");
 
 	// printing the output
-	for (uint32_t i = 0; i < batchSize; i++)
+	for (uint32_t i = 0; i < BATCH_SIZE; i++)
 	{
-		for (uint32_t j = 0; j < outputChannels; j++)
+		for (uint32_t j = 0; j < OUTPUT_CHANNELS; j++)
 		{
-			for (uint32_t k = 0; k < outputImageRows; k++)
+			for (uint32_t k = 0; k < OUTPUT_ROWS; k++)
 			{
-				for (uint32_t l = 0; l < outputImageCols; l++)
+				for (uint32_t l = 0; l < OUTPUT_COLS; l++)
 				{
-					printf("%f ", output[i * outputChannels * outputImageRows * outputImageCols + j * outputImageRows * outputImageCols + k * outputImageCols + l]);
+					printf("%f ", output[i * OUTPUT_CHANNELS * OUTPUT_ROWS * OUTPUT_COLS + j * OUTPUT_ROWS * OUTPUT_COLS + k * OUTPUT_COLS + l]);
 				}
 				printf("\n");
 			}
@@ -165,25 +132,22 @@ int main() {
 	}
 
 	// cpu implementation
-	for (uint32_t i = 0; i < batchSize; i++)
+	for (uint32_t i = 0; i < BATCH_SIZE; i++)
 	{
-		for (uint32_t j = 0; j < outputChannels; j++)
+		for (uint32_t j = 0; j < OUTPUT_CHANNELS; j++)
 		{
-			for (uint32_t k = -verticalPadding; k < outputImageRows * verticalStride - verticalPadding; k += verticalStride)
+			for (uint32_t k = -PADDING; k < OUTPUT_ROWS * STRIDE - PADDING; k += STRIDE)
 			{
-				for (uint32_t l = -horizontalPadding; l < outputImageCols * horizontalStride - horizontalPadding; l += horizontalStride)
+				for (uint32_t l = -PADDING; l < OUTPUT_COLS * STRIDE - PADDING; l += STRIDE)
 				{
 					float sum = 0.0f;
-					for (uint32_t m = 0; m < inputChannels; m++)
+					for (uint32_t m = 0; m < INPUT_CHANNELS; m++)
 					{
-						for (uint32_t n = 0; n < filterRows; n++)
+						for (uint32_t n = 0; n < FILTER_ROWS; n++)
 						{
-							for (uint32_t o = 0; o < filterCols; o++)
+							for (uint32_t o = 0; o < FILTER_COLS; o++)
 							{
-								if (k + n >= 0 && k + n < inputImageRows && l + o >= 0 && l + o < inputImageCols)
-								{
-									sum += input[i * inputChannels * inputImageRows * inputImageCols + m * inputImageRows * inputImageCols + (k + n) * inputImageCols + (l + o)] * filter[j * inputChannels * filterRows * filterCols + m * filterRows * filterCols + n * filterCols + o];
-								}
+								sum += input[i * INPUT_CHANNELS * INPUT_ROWS * INPUT_COLS + m * INPUT_ROWS * INPUT_COLS + (k + n) * INPUT_COLS + (l + o)] * filter[j * INPUT_CHANNELS * FILTER_ROWS * FILTER_COLS + m * FILTER_ROWS * FILTER_COLS + n * FILTER_COLS + o];
 							}
 						}
 					}
@@ -195,40 +159,4 @@ int main() {
 		}
 		printf("\n");
 	}
-
-	// print the input and filter
-	for (uint32_t i = 0; i < batchSize; i++)
-	{
-		for (uint32_t j = 0; j < inputChannels; j++)
-		{
-			for (uint32_t k = 0; k < inputImageRows; k++)
-			{
-				for (uint32_t l = 0; l < inputImageCols; l++)
-				{
-					printf("%f ", input[i * inputChannels * inputImageRows * inputImageCols + j * inputImageRows * inputImageCols + k * inputImageCols + l]);
-				}
-				printf("\n");
-			}
-			printf("\n");
-		}
-		printf("\n");
-	}
-
-	for (uint32_t i = 0; i < outputChannels; i++)
-	{
-		for (uint32_t j = 0; j < inputChannels; j++)
-		{
-			for (uint32_t k = 0; k < filterRows; k++)
-			{
-				for (uint32_t l = 0; l < filterCols; l++)
-				{
-					printf("%f ", filter[i * inputChannels * filterRows * filterCols + j * filterRows * filterCols + k * filterCols + l]);
-				}
-				printf("\n");
-			}
-			printf("\n");
-		}
-		printf("\n");
-	}
-	printf("\n");
 }
